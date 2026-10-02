@@ -8,6 +8,14 @@ and are enforced by commitlint in CI.
 ## [Unreleased]
 
 ### Added
+- **Insurance pool pro-rata accounting edge-case tests (issue #63)** —
+  added three unit tests covering pro-rata insurance pool default payout
+  accounting and deterministic remainder handling (ADR-0003): partial unstake
+  mid-pool followed by a pro-rata payout, a payout that exactly empties the pool
+  across multiple stakers resetting staker records and pool total to zero, and
+  non-divisible remainder distribution across 4 stakers with unequal shares
+  confirming exact integer-division remainder absorption by the final staker and
+  reconciliation of `get_pool_total()` with the sum of individual stakes.
 - **Invoice tokenization with ERC-721-like non-fungible tokens (issue #178)** —
   invoices registered in the `registry` contract now mint a unique non-fungible
   token (`token_id = SHA-256(invoice_id)`) representing invoice ownership.

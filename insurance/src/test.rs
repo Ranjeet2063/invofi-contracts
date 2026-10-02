@@ -473,6 +473,138 @@ fn test_payout_pro_rata_multiple_stakers_exact() {
     assert_eq!(token_client.balance(&beneficiary), 2_000_000);
 }
 
+#[test]
+fn test_payout_pro_rata_partial_unstake_mid_pool() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let payout_caller = Address::generate(&env);
+    let beneficiary = Address::generate(&env);
+    let (token_id, insurance_id, client) = setup(&env, &admin);
+
+    let staker_a = Address::generate(&env);
+    let staker_b = Address::generate(&env);
+    mint_and_approve(&env, &token_id, &insurance_id, &staker_a, 2_000_000);
+    mint_and_approve(&env, &token_id, &insurance_id, &staker_b, 3_000_000);
+    client.stake(&staker_a, &2_000_000);
+    client.stake(&staker_b, &3_000_000);
+
+    // Staker A performs a partial unstake mid-pool (unstakes 1M).
+    client.unstake(&staker_a, &1_000_000);
+    assert_eq!(client.get_stake(&staker_a), 1_000_000);
+    assert_eq!(client.get_stake(&staker_b), 3_000_000);
+    assert_eq!(client.get_pool_total(), 4_000_000);
+
+    client.set_payout_caller(&one(&env, &admin), &payout_caller);
+    let (_reg, invoice_id) =
+        setup_with_defaulted_invoice(&env, &admin, &payout_caller, &client);
+
+    // Payout of 2M reduces remaining stakes pro-rata (25% Staker A, 75% Staker B).
+    let paid = client.pay_out(&invoice_id, &beneficiary, &2_000_000);
+    assert_eq!(paid, 2_000_000);
+
+    let sum_of_stakes = client.get_stake(&staker_a) + client.get_stake(&staker_b);
+    assert_eq!(client.get_pool_total(), 2_000_000);
+    assert_eq!(client.get_pool_total(), sum_of_stakes);
+    assert_eq!(client.get_stake(&staker_a), 500_000);
+    assert_eq!(client.get_stake(&staker_b), 1_500_000);
+    assert_eq!(client.get_contract_token_balance(), 2_000_000);
+    let token_client = token::TokenClient::new(&env, &token_id);
+    assert_eq!(token_client.balance(&beneficiary), 2_000_000);
+}
+
+#[test]
+fn test_payout_pro_rata_exactly_empties_pool_multiple_stakers() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let payout_caller = Address::generate(&env);
+    let beneficiary = Address::generate(&env);
+    let (token_id, insurance_id, client) = setup(&env, &admin);
+
+    let staker_a = Address::generate(&env);
+    let staker_b = Address::generate(&env);
+    let staker_c = Address::generate(&env);
+    mint_and_approve(&env, &token_id, &insurance_id, &staker_a, 1_000_000);
+    mint_and_approve(&env, &token_id, &insurance_id, &staker_b, 2_000_000);
+    mint_and_approve(&env, &token_id, &insurance_id, &staker_c, 3_000_000);
+    client.stake(&staker_a, &1_000_000);
+    client.stake(&staker_b, &2_000_000);
+    client.stake(&staker_c, &3_000_000);
+    assert_eq!(client.get_pool_total(), 6_000_000);
+
+    client.set_payout_caller(&one(&env, &admin), &payout_caller);
+    let (_reg, invoice_id) =
+        setup_with_defaulted_invoice(&env, &admin, &payout_caller, &client);
+
+    // Payout exactly equal to pool total (6M).
+    let paid = client.pay_out(&invoice_id, &beneficiary, &6_000_000);
+    assert_eq!(paid, 6_000_000);
+
+    let sum_of_stakes = client.get_stake(&staker_a)
+        + client.get_stake(&staker_b)
+        + client.get_stake(&staker_c);
+    assert_eq!(client.get_pool_total(), 0);
+    assert_eq!(sum_of_stakes, 0);
+    assert_eq!(client.get_pool_total(), sum_of_stakes);
+    assert_eq!(client.get_stake(&staker_a), 0);
+    assert_eq!(client.get_stake(&staker_b), 0);
+    assert_eq!(client.get_stake(&staker_c), 0);
+    assert_eq!(client.get_stakers_count(), 0);
+    assert_eq!(client.get_contract_token_balance(), 0);
+    let token_client = token::TokenClient::new(&env, &token_id);
+    assert_eq!(token_client.balance(&beneficiary), 6_000_000);
+}
+
+#[test]
+fn test_payout_pro_rata_remainder_distribution_unequal_shares_three_plus_stakers() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let payout_caller = Address::generate(&env);
+    let beneficiary = Address::generate(&env);
+    let (token_id, insurance_id, client) = setup(&env, &admin);
+
+    // 4 stakers with unequal shares: 1M (10%), 2M (20%), 3M (30%), 4M (40%) -> Pool = 10M
+    let staker_a = Address::generate(&env);
+    let staker_b = Address::generate(&env);
+    let staker_c = Address::generate(&env);
+    let staker_d = Address::generate(&env);
+    mint_and_approve(&env, &token_id, &insurance_id, &staker_a, 1_000_000);
+    mint_and_approve(&env, &token_id, &insurance_id, &staker_b, 2_000_000);
+    mint_and_approve(&env, &token_id, &insurance_id, &staker_c, 3_000_000);
+    mint_and_approve(&env, &token_id, &insurance_id, &staker_d, 4_000_000);
+    client.stake(&staker_a, &1_000_000);
+    client.stake(&staker_b, &2_000_000);
+    client.stake(&staker_c, &3_000_000);
+    client.stake(&staker_d, &4_000_000);
+    assert_eq!(client.get_pool_total(), 10_000_000);
+
+    client.set_payout_caller(&one(&env, &admin), &payout_caller);
+    let (_reg, invoice_id) =
+        setup_with_defaulted_invoice(&env, &admin, &payout_caller, &client);
+
+    // Payout of an odd amount (3_333_333) produces integer-division remainders.
+    // Deterministic remainder absorption ensures exact total reduction:
+    // Reductions sum to 3_333_333, pool total becomes exactly 6_666_667.
+    let paid = client.pay_out(&invoice_id, &beneficiary, &3_333_333);
+    assert_eq!(paid, 3_333_333);
+
+    let sum_of_stakes = client.get_stake(&staker_a)
+        + client.get_stake(&staker_b)
+        + client.get_stake(&staker_c)
+        + client.get_stake(&staker_d);
+    assert_eq!(client.get_pool_total(), 6_666_667);
+    assert_eq!(sum_of_stakes, 6_666_667);
+    assert_eq!(client.get_pool_total(), sum_of_stakes);
+    assert_eq!(client.get_contract_token_balance(), 6_666_667);
+    let token_client = token::TokenClient::new(&env, &token_id);
+    assert_eq!(token_client.balance(&beneficiary), 3_333_333);
+}
+
 // ── Rejection: invoice not Defaulted ─────────────────────────────────────────
 
 /// pay_out must reject when the invoice is in any status other than Defaulted.
